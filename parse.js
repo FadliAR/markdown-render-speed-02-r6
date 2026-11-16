@@ -480,13 +480,15 @@ function lexBlocks(lines, start, end, refs, atDocEnd, srcEndsNL, depth) {
           const body = [];
           for (let k = i; k < j; k++) body.push(stripX00(lines[k]));
           text = body.join('\n');
-          if (j < end && lines[j] !== '') text += '\n';
+          const restBlank = lines.slice(j, end).every((l) => isBlankLine(stripX00(l)));
+          if ((j < end && lines[j] !== '') || (atDocEnd && srcEndsNL && restBlank)) text += '\n';
         } else {
           while (j < end && !isBlankLine(stripX00(lines[j]))) j++;
           const body = [];
           for (let k = i; k < j; k++) body.push(stripX00(lines[k]));
           text = body.join('\n');
-          if (atDocEnd && j >= end && srcEndsNL) text += '\n';
+          const restBlank = lines.slice(j, end).every((l) => isBlankLine(stripX00(l)));
+          if (atDocEnd && srcEndsNL && restBlank) text += '\n';
         }
         tokens.push({ t: 'html', text });
         noteToken();
