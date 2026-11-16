@@ -312,7 +312,7 @@ function parseDelimRow(line) {
 // ---------- block lexer ----------
 const BLOCK_TAGS = new Set(('address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul').split(' '));
 
-function stripX00(l) { return l.startsWith('\x00') ? l.slice(1) : l; }
+function stripX00(l) { return l.replace(/^\x00+/, ''); }
 
 function htmlBlockStart(content) {
   if (!content.startsWith('<')) return null;
@@ -412,6 +412,7 @@ function lexBlocks(lines, start, end, refs, atDocEnd, srcEndsNL, depth) {
   const flushPara = () => {
     if (!para) return;
     tokens.push(lexParagraph(para));
+    noteToken();
     para = null;
   };
   const noteToken = () => {
@@ -421,7 +422,7 @@ function lexBlocks(lines, start, end, refs, atDocEnd, srcEndsNL, depth) {
   while (i < end) {
     const rawLine = lines[i];
     const lazy = rawLine.startsWith('\x00');
-    const raw = lazy ? rawLine.slice(1) : rawLine;
+    const raw = stripX00(rawLine);
     if (isBlankLine(raw)) {
       flushPara();
       blankPending = true;
@@ -431,7 +432,7 @@ function lexBlocks(lines, start, end, refs, atDocEnd, srcEndsNL, depth) {
     const ind = indentOf(raw);
     const content = stripIndent(raw, Math.min(ind, 3));
     // setext underline (paragraph only, checked before hr/list)
-    if (para && !lazy) {
+    if (para) {
       const sm = SETEXT_RE.exec(raw);
       if (sm) {
         const text = para.join('\n');
@@ -580,6 +581,32 @@ function lexBlocks(lines, start, end, refs, atDocEnd, srcEndsNL, depth) {
   return { tokens, sawBlankBetween };
 }
 
+// A lazy continuation line must be plain paragraph text: if it starts a block
+// that can interrupt a paragraph (ATX, fence, HR, HTML 1-6, quote, list) it
+// ends the quote instead. Setext underlines stay lazy (they belong to the
+// open paragraph).
+function isLazyBlockStart(lines, j, end) {
+  const raw = stripX00(lines[j]);
+  if (isBlankLine(raw)) return false;
+  const ind = indentOf(raw);
+  const content = stripIndent(raw, Math.min(ind, 3));
+  if (/^(#{1,6})(?:[ \t]+|[ \t]*$)/.test(content)) return true;
+  const fm = /^(`{3,}|~{3,})(.*)$/.exec(content);
+  if (fm && (fm[1][0] === '~' || !fm[2].includes('`'))) return true;
+  const hb = htmlBlockStart(content);
+  if (hb && hb.type !== 7) return true;
+  if (HR_RE.test(content) && !SETEXT_RE.test(raw)) return true;
+  if (/^ {0,3}>/.test(raw)) return true;
+  const lm = LIST_RE.exec(raw);
+  if (lm) {
+    if (!lm[2]) return true;
+    const startNum = parseInt(lm[1], 10);
+    if (startNum === 1) return true;
+    return countItemsAhead(lines, j, end) >= 2;
+  }
+  return false;
+}
+
 function gatherQuote(lines, i, end, atDocEnd) {
   const inner = [];
   let j = i;
@@ -587,7 +614,7 @@ function gatherQuote(lines, i, end, atDocEnd) {
     const line = lines[j];
     const m = /^ {0,3}>[ \t]?/.exec(line);
     if (m) { inner.push(line.slice(m[0].length)); j++; continue; }
-    if (!isBlankLine(line) && inner.length && !isBlankLine(inner[inner.length - 1])) {
+    if (!isBlankLine(line) && inner.length && !isBlankLine(inner[inner.length - 1]) && !isLazyBlockStart(lines, j, end)) {
       inner.push('\x00' + line);
       j++;
       continue;
@@ -1186,7 +1213,7 @@ function renderTokens(tokens, refs) {
               }
               firstTok = false;
             }
-            out += '<li>\n' + inner + '</li>\n';
+            out += '<li>' + inner + '</li>\n';
           }
         }
         out += '</' + tag + '>\n';
