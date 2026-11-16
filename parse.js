@@ -346,13 +346,17 @@ function gatherFence(lines, i, end) {
   const fenceInd = Math.min(ind, 3);
   const out = [];
   let j = i + 1;
+  let closed = false;
   while (j < end) {
     const l = stripX00(lines[j]);
     const cm = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(l);
-    if (cm && cm[1][0] === ch && cm[1].length >= len) { j++; break; }
+    if (cm && cm[1][0] === ch && cm[1].length >= len) { j++; closed = true; break; }
     out.push(stripIndent(l, fenceInd));
     j++;
   }
+  // Unterminated fence: the final empty line is the trailing-newline artifact,
+  // not content. Drop exactly one trailing blank line.
+  if (!closed && out.length && out[out.length - 1] === '') out.pop();
   return { lang, text: out.length ? out.join('\n') + '\n' : '', next: j };
 }
 
@@ -1162,7 +1166,7 @@ function renderTokens(tokens, refs) {
           const a = tok.aligns[i];
           out += '<th' + (a ? ' align="' + a + '"' : '') + '>' + parseInline(tok.header[i], refs) + '</th>\n';
         }
-        out += '</tr>\n</thead>\n<tbody>\n';
+        out += '</tr>\n</thead>\n<tbody>';
         for (const row of tok.rows) {
           out += '<tr>\n';
           for (let i = 0; i < row.length; i++) {
@@ -1171,7 +1175,7 @@ function renderTokens(tokens, refs) {
           }
           out += '</tr>\n';
         }
-        out += '</tbody>\n</table>\n';
+        out += '</tbody></table>\n';
         break;
       }
       case 'list': {
